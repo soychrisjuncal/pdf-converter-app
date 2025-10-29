@@ -4,7 +4,7 @@ import multer from 'multer'
 import path from 'path'
 import fs from 'fs'
 import { fileURLToPath } from 'url'
-import { convertDocxToPdf, convertXlsxToPdf, convertTxtToPdf, handleCrdownload } from './converters.js'
+import { convertDocxToPdf, convertXlsxToPdf, convertTxtToPdf, handleCrdownload, handlePdf } from './converters.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -13,9 +13,14 @@ const app = express()
 const PORT = process.env.PORT || 3000
 
 // Middleware
-app.use(cors())
+// Middleware
+app.use(cors({
+  origin: ['https://soychrisjuncal.github.io', 'http://localhost:5173'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}))
 app.use(express.json())
-
 // Crear directorios para uploads y conversiones
 const uploadsDir = path.join(__dirname, 'uploads')
 const outputsDir = path.join(__dirname, 'outputs')
@@ -73,6 +78,11 @@ app.post('/api/convert', upload.array('files', 10), async (req, res) => {
 
         // Determinar tipo de archivo y convertir
         switch (ext) {
+
+          case '.pdf':
+  await handlePdf(file.path, outputPath)
+  converted = true
+  break
           case '.docx':
           case '.doc':
             await convertDocxToPdf(file.path, outputPath)

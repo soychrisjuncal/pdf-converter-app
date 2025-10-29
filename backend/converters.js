@@ -259,6 +259,16 @@ function detectFileType(buffer) {
   return null
 }
 
+export async function handlePdf(inputPath, outputPath) {
+  try {
+    // Si ya es PDF, simplemente copiarlo
+    fs.copyFileSync(inputPath, outputPath)
+    return { success: true, message: 'PDF procesado' }
+  } catch (error) {
+    throw new Error(`Error al procesar PDF: ${error.message}`)
+  }
+}
+
 export default {
   convertDocxToPdf,
   convertXlsxToPdf,
