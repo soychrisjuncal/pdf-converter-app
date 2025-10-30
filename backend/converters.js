@@ -2,49 +2,60 @@ import fs from 'fs'
 import path from 'path'
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib'
 import xlsx from 'xlsx'
+import CloudConvert from 'cloudconvert'
+
+// Inicializar CloudConvert con tu API key
+const cloudConvert = new CloudConvert(process.env.CLOUDCONVERT_API_KEY)
 
 /**
- * Convierte archivos DOCX/DOC a PDF
- * Nota: Para producción, necesitarás LibreOffice o una API externa
+ * Convierte archivos DOCX/DOC a PDF usando CloudConvert
  */
 export async function convertDocxToPdf(inputPath, outputPath) {
   try {
-    // Para una implementación simple, creamos un PDF con el texto extraído
-    // En producción, usa LibreOffice CLI o una API como CloudConvert
-    
-    const pdfDoc = await PDFDocument.create()
-    const page = pdfDoc.addPage([600, 800])
-    const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
-    
-    page.drawText('Documento convertido desde DOCX', {
-      x: 50,
-      y: 750,
-      size: 16,
-      font,
-      color: rgb(0, 0, 0),
+    if (!process.env.CLOUDCONVERT_API_KEY) {
+      throw new Error('CloudConvert API key no configurada')
+    }
+
+    // Crear job de conversión
+    let job = await cloudConvert.jobs.create({
+      tasks: {
+        'upload-file': {
+          operation: 'import/upload'
+        },
+        'convert-file': {
+          operation: 'convert',
+          input: 'upload-file',
+          output_format: 'pdf',
+          engine: 'office'
+        },
+        'export-file': {
+          operation: 'export/url',
+          input: 'convert-file'
+        }
+      }
     })
+
+    // Subir archivo
+    const uploadTask = job.tasks.filter(task => task.name === 'upload-file')[0]
+    const inputFile = fs.readFileSync(inputPath)
     
-    page.drawText('Este es un placeholder de conversión.', {
-      x: 50,
-      y: 720,
-      size: 12,
-      font,
-      color: rgb(0.3, 0.3, 0.3),
-    })
+    await cloudConvert.tasks.upload(uploadTask, inputFile, path.basename(inputPath))
+
+    // Esperar a que termine la conversión
+    job = await cloudConvert.jobs.wait(job.id)
+
+    // Descargar el resultado
+    const exportTask = job.tasks.filter(task => task.name === 'export-file')[0]
+    const file = exportTask.result.files[0]
     
-    page.drawText('Para producción, integra LibreOffice o una API externa.', {
-      x: 50,
-      y: 700,
-      size: 10,
-      font,
-      color: rgb(0.5, 0.5, 0.5),
-    })
+    const response = await fetch(file.url)
+    const buffer = await response.arrayBuffer()
     
-    const pdfBytes = await pdfDoc.save()
-    fs.writeFileSync(outputPath, pdfBytes)
-    
-    return { success: true, message: 'Convertido exitosamente' }
+    fs.writeFileSync(outputPath, Buffer.from(buffer))
+
+    return { success: true, message: 'Convertido con CloudConvert' }
   } catch (error) {
+    console.error('Error en CloudConvert:', error)
     throw new Error(`Error al convertir DOCX: ${error.message}`)
   }
 }
@@ -78,7 +89,7 @@ export async function convertXlsxToPdf(inputPath, outputPath) {
     
     // Renderizar datos (primeras 30 filas)
     data.slice(0, 30).forEach((row, index) => {
-      if (yPosition < 50) return // Evitar salir del margen
+      if (yPosition < 50) return
       
       const rowText = row.join(' | ')
       page.drawText(rowText.substring(0, 100), {
@@ -144,15 +155,25 @@ export async function convertTxtToPdf(inputPath, outputPath) {
 }
 
 /**
- * Maneja archivos .crdownload (descargas incompletas de Chrome)
- * Intenta detectar el tipo y procesar lo que sea posible
+ * Maneja archivos PDF (copia directa)
+ */
+export async function handlePdf(inputPath, outputPath) {
+  try {
+    fs.copyFileSync(inputPath, outputPath)
+    return { success: true, message: 'PDF procesado' }
+  } catch (error) {
+    throw new Error(`Error al procesar PDF: ${error.message}`)
+  }
+}
+
+/**
+ * Maneja archivos .crdownload
  */
 export async function handleCrdownload(inputPath, outputPath) {
   try {
     const stats = fs.statSync(inputPath)
     const buffer = fs.readFileSync(inputPath)
     
-    // Crear un PDF informativo sobre el archivo .crdownload
     const pdfDoc = await PDFDocument.create()
     const page = pdfDoc.addPage([600, 800])
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
@@ -209,7 +230,6 @@ export async function handleCrdownload(inputPath, outputPath) {
       yPos -= 25
     })
     
-    // Detectar posible tipo de archivo
     const possibleType = detectFileType(buffer)
     if (possibleType) {
       page.drawText(`Posible tipo de archivo: ${possibleType}`, {
@@ -234,9 +254,6 @@ export async function handleCrdownload(inputPath, outputPath) {
   }
 }
 
-/**
- * Intenta detectar el tipo de archivo por sus magic bytes
- */
 function detectFileType(buffer) {
   const signatures = {
     'PDF': [0x25, 0x50, 0x44, 0x46],
@@ -259,19 +276,10 @@ function detectFileType(buffer) {
   return null
 }
 
-export async function handlePdf(inputPath, outputPath) {
-  try {
-    // Si ya es PDF, simplemente copiarlo
-    fs.copyFileSync(inputPath, outputPath)
-    return { success: true, message: 'PDF procesado' }
-  } catch (error) {
-    throw new Error(`Error al procesar PDF: ${error.message}`)
-  }
-}
-
 export default {
   convertDocxToPdf,
   convertXlsxToPdf,
   convertTxtToPdf,
-  handleCrdownload
+  handleCrdownload,
+  handlePdf
 }
